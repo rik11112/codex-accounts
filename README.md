@@ -25,12 +25,11 @@ Keyring and ephemeral credentials are not managed by this tool. See the
 
 ## Install or replace the original tool
 
-The current build on `main` is available for testing. CLI disconnection and
-reconnection after daemon shutdown have been checked. Account loading after a
-switch and interrupted/background work still need checking before the first release.
+Install the stable `v1.0.0` release. The command pins both the installer and the
+executable so team members install the same version.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rik11112/codex-accounts/main/install.sh | CODEX_ACCOUNTS_REF=main bash
+curl -fsSL https://raw.githubusercontent.com/rik11112/codex-accounts/v1.0.0/install.sh | bash
 ```
 
 The installer replaces `~/.codex/codex-accounts` directly. Existing saved accounts,
@@ -156,9 +155,8 @@ Keep `auth.json` and saved snapshots private; they contain login credentials.
 
 ## Updating and rollback
 
-Re-run the install command to replace the executable with the current build.
-After the first tested release is tagged, installation can be pinned to that
-version so team members install the same code. The installer accepts a
+Re-run the install command for the release you want to install. Releases are
+pinned to Git tags so team members install the same code. The installer accepts a
 `CODEX_ACCOUNTS_REF` environment variable to select a tag or commit.
 
 To return to the original tool, reinstall it using its Gist instructions. Your
@@ -178,6 +176,10 @@ CI runs these checks on Linux and macOS with Python 3.10 and 3.12.
 Actual daemon start/stop has also been checked with Codex 0.159.3 using an isolated
 `CODEX_HOME` without real credentials. A separate manual test of live CLI sessions
 confirmed the disconnection/reconnection behavior described above.
+
+Pushing a `v*` tag runs the checks and publishes a GitHub release from
+`RELEASE_NOTES.md` after they pass. Update the version, installer reference,
+README install command, and release notes before tagging a new release.
 
 Before team rollout, verify a real account switch: check that existing CLI sessions
 reconnect after the automatic daemon start and check the account they use. Also

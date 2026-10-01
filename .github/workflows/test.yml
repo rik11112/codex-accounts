@@ -16,3 +16,18 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python3 -m unittest discover -s tests -v
       - run: bash -n install.sh
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release version
+        run: |
+          test "$(./codex-accounts --version)" = "codex-accounts ${GITHUB_REF_NAME#v}"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "codex-accounts $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
