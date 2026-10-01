@@ -16,6 +16,7 @@ class InstallerTests(unittest.TestCase):
         (self.home / "accounts").mkdir()
         (self.home / "accounts/work.json").write_text("saved-credentials")
         (self.home / "auth.json").write_text("current-credentials")
+        (self.home / "codex-accounts.json").write_text('{"no-switch-confirm":true}')
         (self.home / "codex-accounts").write_text("old executable")
         self.bin = Path(self.tmp.name) / "bin"
         self.bin.mkdir()
@@ -44,6 +45,7 @@ else:
     def assert_accounts_untouched(self):
         self.assertEqual((self.home / "auth.json").read_text(), "current-credentials")
         self.assertEqual((self.home / "accounts/work.json").read_text(), "saved-credentials")
+        self.assertEqual((self.home / "codex-accounts.json").read_text(), '{"no-switch-confirm":true}')
         self.assertEqual(list(self.home.glob(".codex-accounts-install.*")), [])
 
     def test_local_install_replaces_only_executable_without_backup(self):
@@ -51,7 +53,7 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.home / "codex-accounts").read_bytes(), (ROOT / "codex-accounts").read_bytes())
         self.assertEqual((self.home / "codex-accounts").stat().st_mode & 0o777, 0o755)
-        self.assertEqual(set(p.name for p in self.home.iterdir()), {"auth.json", "accounts", "codex-accounts"})
+        self.assertEqual(set(p.name for p in self.home.iterdir()), {"auth.json", "accounts", "codex-accounts", "codex-accounts.json"})
         self.assert_accounts_untouched()
 
     def test_remote_install_downloads_from_pinned_release(self):

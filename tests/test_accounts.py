@@ -224,6 +224,70 @@ print(os.environ.get("FAKE_RESULT", '{"status":"stopped"}'))
         self.assertFalse((self.home / "daemon-events").exists())
         self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.before)
 
+    def test_settings_default_to_false_without_creating_file(self):
+        result = self.run_cli("config", "no-switch-confirm")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "no-switch-confirm: false")
+        self.assertFalse((self.home / "codex-accounts.json").exists())
+        self.assertFalse((self.home / "daemon-events").exists())
+
+    def test_enabled_setting_switches_without_flags_and_keeps_messages(self):
+        configured = self.run_cli("config", "no-switch-confirm", "true")
+        self.assertEqual(configured.returncode, 0, configured.stderr)
+        self.assertEqual(json.loads((self.home / "codex-accounts.json").read_text()), {"no-switch-confirm": True})
+        result = subprocess.run(
+            ["python3", str(SCRIPT), "sw", "after"], env=self.env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.after)
+        lines = result.stdout.splitlines()
+        self.assertEqual(len(lines), 3)
+        self.assertIn("Warning:", lines[0])
+        self.assertEqual(lines[2], "Recommended: restart any running Codex sessions.")
+
+    def test_disabling_setting_restores_confirmation(self):
+        self.assertEqual(self.run_cli("config", "no-switch-confirm", "true").returncode, 0)
+        result = self.run_cli("config", "no-switch-confirm", "false")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.run_cli("config").stdout.strip(), "no-switch-confirm: false")
+        result = self.run_cli("sw", "after")
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse((self.home / "daemon-events").exists())
+        self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.before)
+        self.assertEqual(self.run_cli("sw", "after", "-f").returncode, 0)
+
+    def test_missing_setting_defaults_to_false_and_other_settings_are_preserved(self):
+        path = self.home / "codex-accounts.json"
+        self.write(path, {"other-setting": "preserved"})
+        self.assertEqual(self.run_cli("config").stdout.strip(), "no-switch-confirm: false")
+        self.assertEqual(self.run_cli("config", "no-switch-confirm", "true").returncode, 0)
+        self.assertEqual(json.loads(path.read_text()), {"no-switch-confirm": True, "other-setting": "preserved"})
+
+    def test_switch_setting_does_not_bypass_logout_confirmation(self):
+        self.assertEqual(self.run_cli("config", "no-switch-confirm", "true").returncode, 0)
+        result = self.run_cli("logout")
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse((self.home / "daemon-events").exists())
+        self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.before)
+
+    def test_invalid_settings_do_not_silently_bypass_confirmation(self):
+        path = self.home / "codex-accounts.json"
+        for raw in ('invalid-json', '[]', '{"no-switch-confirm":"false"}', '{"no-switch-confirm":1}'):
+            with self.subTest(raw=raw):
+                path.write_text(raw)
+                result = self.run_cli("sw", "after")
+                self.assertEqual(result.returncode, 1)
+                self.assertFalse((self.home / "daemon-events").exists())
+                self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.before)
+
+    def test_invalid_setting_name_or_value_does_not_write_config(self):
+        for arguments in (("unknown", "true"), ("no-switch-confirm", "yes")):
+            with self.subTest(arguments=arguments):
+                result = self.run_cli("config", *arguments)
+                self.assertEqual(result.returncode, 2)
+                self.assertFalse((self.home / "codex-accounts.json").exists())
+
     def test_interactive_cancel_has_no_effect(self):
         args = mock.Mock(yes=False)
         args.name = "after"

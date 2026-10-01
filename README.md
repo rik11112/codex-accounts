@@ -61,6 +61,7 @@ bash install.sh --local
 ~/.codex/codex-accounts switch personal
 ~/.codex/codex-accounts current
 ~/.codex/codex-accounts logout
+~/.codex/codex-accounts config no-switch-confirm true
 ~/.codex/codex-accounts remove old-account
 ~/.codex/codex-accounts --version
 ```
@@ -82,6 +83,19 @@ An empty answer, `n`, or EOF cancels the switch. For deliberate noninteractive u
 ```bash
 ~/.codex/codex-accounts switch work --yes  # -y, -f, and --force also work
 ```
+
+To skip switch confirmation by default:
+
+```bash
+cx config no-switch-confirm true   # disable switch confirmation
+cx config no-switch-confirm false  # restore confirmation
+cx config no-switch-confirm        # show the current setting
+```
+
+This per-user setting is stored in `~/.codex/codex-accounts.json`, or under your
+custom `CODEX_HOME`. It defaults to `false` when the file or setting is missing.
+The warning and restart recommendation remain visible. Logout confirmation is
+independent and still requires confirmation or `-y`/`-f`.
 
 Switching validates the saved credentials, stops the daemon using
 `codex app-server daemon stop`, and checks that Codex reports `stopped` or

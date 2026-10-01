@@ -24,6 +24,30 @@ def codex_home():
     return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser().resolve()
 
 
+def load_settings(home):
+    path = home / "codex-accounts.json"
+    try:
+        settings = json.loads(path.read_bytes())
+    except FileNotFoundError:
+        return {"no-switch-confirm": False}
+    except (ValueError, UnicodeError):
+        raise AccountError(f"Invalid settings JSON at {path}.") from None
+    if not isinstance(settings, dict) or not isinstance(settings.get("no-switch-confirm", False), bool):
+        raise AccountError(f"Settings at {path} must be an object with a boolean no-switch-confirm value.")
+    return {"no-switch-confirm": False, **settings}
+
+
+def configure(home, args):
+    if args.value is None:
+        settings = load_settings(home)
+    else:
+        with account_lock(home):
+            settings = load_settings(home)
+            settings[args.setting] = args.value == "true"
+            write_auth(home / "codex-accounts.json", (json.dumps(settings, indent=2) + "\n").encode())
+    print(f"{args.setting}: {str(settings[args.setting]).lower()}")
+
+
 def account_path(home, name):
     if (not name or name in {".", ".."} or name != name.strip()
             or any(c in "/\\" or not c.isprintable() for c in name)):
@@ -256,7 +280,7 @@ def switch(home, args):
     target = account_path(home, args.name)
     read_auth(target)
     check_storage(home)
-    if not confirm_switch(args.yes):
+    if not confirm_switch(args.yes or load_settings(home)["no-switch-confirm"]):
         print("Cancelled. Credentials unchanged.")
         return
     with account_lock(home):
@@ -292,6 +316,8 @@ def dispatch(home, args):
         switch(home, args)
     elif args.command == "logout":
         logout(home, args)
+    elif args.command == "config":
+        configure(home, args)
     elif args.command in {"list", "ls", "current", "whoami"}:
         auth = read_auth(home / "auth.json")[1] if (home / "auth.json").exists() else None
         active = matching_account(home, auth) if auth else None
@@ -348,6 +374,9 @@ def main():
     remove = commands.add_parser("remove", aliases=["rm"], help="Remove a saved account")
     remove.add_argument("name")
     commands.add_parser("current", aliases=["whoami"], help="Show the login stored on disk")
+    config = commands.add_parser("config", help="Read or update tool settings")
+    config.add_argument("setting", nargs="?", default="no-switch-confirm", choices=["no-switch-confirm"])
+    config.add_argument("value", nargs="?", choices=["true", "false"])
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
