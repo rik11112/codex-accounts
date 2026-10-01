@@ -60,12 +60,14 @@ bash install.sh --local
 ~/.codex/codex-accounts add work
 ~/.codex/codex-accounts switch personal
 ~/.codex/codex-accounts current
+~/.codex/codex-accounts logout
 ~/.codex/codex-accounts remove old-account
 ~/.codex/codex-accounts --version
 ```
 
 `ls`, `sw`, `whoami`, and `rm` are aliases for `list`, `switch`, `current`, and
-`remove`. `add` without a name uses the local part of your login email;
+`remove`. `logout` stops the daemon and signs out while protecting saved credentials.
+`add` without a name uses the local part of your login email;
 `add --force NAME` replaces an existing snapshot.
 
 ### Switching
@@ -78,7 +80,7 @@ Restart the daemon and switch accounts? [y/N]
 An empty answer, `n`, or EOF cancels the switch. For deliberate noninteractive use:
 
 ```bash
-~/.codex/codex-accounts switch work --yes
+~/.codex/codex-accounts switch work --yes  # -y, -f, and --force also work
 ```
 
 Switching validates the saved credentials, stops the daemon using
@@ -86,7 +88,8 @@ Switching validates the saved credentials, stops the daemon using
 `notRunning`. Shutdown failure or timeout aborts the switch. It then saves any
 refreshed credentials for the account being left, atomically replaces
 `auth.json`, and runs `codex app-server daemon start`. Existing CLI sessions can
-then reconnect without opening another CLI.
+then reconnect without opening another CLI. The switch output also recommends
+restarting any running Codex sessions to refresh their account state.
 
 If startup fails or times out, the selected credentials remain on disk and the
 command exits with an error explaining that the account was switched. Retry
@@ -118,14 +121,20 @@ Save your current account first:
 ```
 
 Close other Codex clients and let background tasks finish. Then, from a separate
-terminal, stop the daemon and log into the next account:
+terminal, use the protected logout command and log into the next account:
 
 ```bash
-codex app-server daemon stop
-codex logout
+~/.codex/codex-accounts logout
 codex login
 ~/.codex/codex-accounts add personal
 ```
+
+`logout` confirms before stopping the daemon, saves refreshed credentials for the
+matching saved account, replaces `auth.json` with an empty credential object, then
+runs `codex logout`. This keeps the real saved credentials out of the logout
+operation. The daemon stays stopped. Use `logout -y` or `logout -f` to skip
+confirmation. If logout fails, saved accounts remain intact and the current
+credentials remain cleared; retry `codex logout`.
 
 Saved snapshots can still expire or be revoked. If an account stops working,
 log into it again and replace its snapshot with `add --force NAME`.
@@ -150,7 +159,7 @@ bash -n install.sh
 
 Automated tests use fake credentials and a fake Codex command to check confirmation,
 stop/swap/start ordering and failures, token refresh, private file permissions, account
-commands, concurrent switches, and installer replacement/failure behavior.
+commands, protected logout, concurrent switches, and installer replacement/failure behavior.
 CI runs these checks on Linux and macOS with Python 3.10 and 3.12.
 Actual daemon start/stop has also been checked with Codex 0.159.3 using an isolated
 `CODEX_HOME` without real credentials. A separate manual test of live CLI sessions

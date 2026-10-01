@@ -43,6 +43,16 @@ class AccountsTests(unittest.TestCase):
         daemon.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, sys
 home = pathlib.Path(os.environ["CODEX_HOME"])
+if sys.argv[1:] == ["logout"]:
+    with (home / "daemon-call-order").open("a") as log:
+        log.write("logout\\n")
+    (home / "logout-events").write_text((home / "auth.json").read_text())
+    if os.environ.get("FAKE_LOGOUT_FAILURE"):
+        print("private-logout-output", file=sys.stderr)
+        sys.exit(1)
+    (home / "auth.json").unlink()
+    print("Successfully logged out")
+    sys.exit(0)
 assert sys.argv[1:3] == ["app-server", "daemon"]
 assert sys.argv[3] in {"stop", "start"}
 with (home / "daemon-call-order").open("a") as log:
@@ -122,6 +132,90 @@ print(os.environ.get("FAKE_RESULT", '{"status":"stopped"}'))
     def test_stopped_daemon_is_not_required_to_switch(self):
         result = self.run_cli("sw", "after", "-y", FAKE_RESULT='{"status":"notRunning"}')
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_switch_force_alias_and_third_output_line(self):
+        for flag in ("-y", "-f", "--yes", "--force"):
+            with self.subTest(flag=flag):
+                result = subprocess.run(
+                    ["python3", str(SCRIPT), "sw", "after", flag], env=self.env,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=10,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout)
+                lines = result.stdout.splitlines()
+                self.assertEqual(len(lines), 3)
+                self.assertEqual(lines[2], "Recommended: restart any running Codex sessions.")
+
+    def test_logout_stops_then_clears_credentials_before_codex_logout(self):
+        result = self.run_cli("logout", "-y")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.home / "daemon-call-order").read_text().splitlines(), ["stop", "logout"])
+        self.assertEqual(json.loads((self.home / "daemon-events").read_text()), self.before)
+        self.assertEqual(json.loads((self.home / "logout-events").read_text()), {})
+        self.assertFalse((self.home / "auth.json").exists())
+        self.assertFalse((self.home / "daemon-start-events").exists())
+        self.assertEqual(json.loads((self.home / "accounts/before.json").read_text()), self.before)
+        self.assertEqual(json.loads((self.home / "accounts/after.json").read_text()), self.after)
+
+    def test_logout_preserves_refreshed_saved_credentials(self):
+        result = self.run_cli("logout", "-f", FAKE_REFRESH="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        saved = json.loads((self.home / "accounts/before.json").read_text())
+        self.assertEqual(saved["tokens"]["access_token"], "refreshed-during-stop")
+        self.assertEqual(json.loads((self.home / "logout-events").read_text()), {})
+
+    def test_logout_shutdown_failure_leaves_credentials_unchanged(self):
+        result = self.run_cli("logout", "-y", FAKE_FAILURE="1")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.before)
+        self.assertEqual(json.loads((self.home / "accounts/before.json").read_text()), self.before)
+        self.assertFalse((self.home / "logout-events").exists())
+
+    def test_logout_failure_preserves_saved_account_and_cleared_current_auth(self):
+        result = self.run_cli("logout", "-y", FAKE_LOGOUT_FAILURE="1")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(json.loads((self.home / "auth.json").read_text()), {})
+        self.assertEqual(json.loads((self.home / "accounts/before.json").read_text()), self.before)
+        self.assertIn("Saved accounts are preserved", result.stderr)
+        self.assertNotIn("private-logout-output", result.stderr)
+        self.assertEqual(self.run_cli("logout", "-y").returncode, 0)
+
+    def test_logout_without_confirmation_does_not_stop_or_clear_auth(self):
+        result = self.run_cli("logout")
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse((self.home / "daemon-events").exists())
+        self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.before)
+
+    def test_logout_cancel_has_no_effect(self):
+        args = mock.Mock(yes=False)
+        with mock.patch.object(accounts.sys.stdin, "isatty", return_value=True), \
+                mock.patch("builtins.input", return_value="n"), \
+                mock.patch.object(accounts, "stop_daemon") as stop:
+            accounts.logout(self.home, args)
+        stop.assert_not_called()
+        self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.before)
+
+    def test_logout_requires_file_storage(self):
+        (self.home / "config.toml").write_text('cli_auth_credentials_store = "keyring"\n')
+        result = self.run_cli("logout", "-y")
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse((self.home / "daemon-events").exists())
+
+    def test_logout_with_no_current_auth_leaves_saved_accounts_untouched(self):
+        (self.home / "auth.json").unlink()
+        result = self.run_cli("logout", "-y")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads((self.home / "logout-events").read_text()), {})
+        self.assertEqual(json.loads((self.home / "accounts/before.json").read_text()), self.before)
+
+    def test_logout_does_not_run_if_credential_clear_fails(self):
+        args = mock.Mock(yes=True)
+        with mock.patch.object(accounts, "stop_daemon"), \
+                mock.patch.object(accounts, "write_auth", side_effect=PermissionError()), \
+                mock.patch.object(accounts.subprocess, "run") as command:
+            with self.assertRaises(PermissionError):
+                accounts.logout(self.home, args)
+        command.assert_not_called()
+        self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.before)
 
     def test_noninteractive_switch_requires_explicit_yes(self):
         result = self.run_cli("switch", "after")

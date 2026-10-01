@@ -212,6 +212,46 @@ def confirm_switch(yes):
         return False
 
 
+def logout(home, args):
+    check_storage(home)
+    print("Warning: logout stops the Codex daemon and disconnects active sessions.", file=sys.stderr)
+    if not args.yes:
+        if not sys.stdin.isatty():
+            raise AccountError("Confirmation requires a terminal. Use --yes to accept the interruption.")
+        try:
+            confirmed = input("Stop the daemon and log out? [y/N] ").strip().lower() in {"y", "yes"}
+        except EOFError:
+            confirmed = False
+        if not confirmed:
+            print("Cancelled. Credentials unchanged.")
+            return
+    with account_lock(home):
+        stop_daemon(home)
+        current = home / "auth.json"
+        if current.exists():
+            try:
+                raw, auth = read_auth(current)
+            except AccountError:
+                pass  # Already-invalid credentials do not need saving.
+            else:
+                previous = matching_account(home, auth)
+                if previous is not None:
+                    write_auth(previous, raw)
+        # Remove the real tokens before Codex can act on them during logout.
+        write_auth(current, b"{}\n")
+        recovery = "Current credentials were cleared. Saved accounts are preserved; retry 'codex logout'."
+        try:
+            result = subprocess.run(
+                ["codex", "logout"], env=dict(os.environ, CODEX_HOME=str(home)),
+                capture_output=True, text=True, timeout=60,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            raise AccountError(f"Could not complete Codex logout. {recovery}") from None
+        if result.returncode:
+            raise AccountError(f"Codex logout failed. {recovery}")
+    print("Logged out. Saved accounts preserved.")
+
+
 def switch(home, args):
     target = account_path(home, args.name)
     read_auth(target)
@@ -244,11 +284,14 @@ def switch(home, args):
             ) from None
     email, _ = describe(auth)
     print(f"Switched to: {args.name} ({email}). Codex daemon started; existing CLI sessions can reconnect.")
+    print("Recommended: restart any running Codex sessions.")
 
 
 def dispatch(home, args):
     if args.command in {"switch", "sw"}:
         switch(home, args)
+    elif args.command == "logout":
+        logout(home, args)
     elif args.command in {"list", "ls", "current", "whoami"}:
         auth = read_auth(home / "auth.json")[1] if (home / "auth.json").exists() else None
         active = matching_account(home, auth) if auth else None
@@ -299,7 +342,9 @@ def main():
     add.add_argument("-f", "--force", action="store_true")
     change = commands.add_parser("switch", aliases=["sw"], help="Switch accounts and restart the daemon")
     change.add_argument("name")
-    change.add_argument("-y", "--yes", action="store_true", help="Accept interruption without prompting")
+    change.add_argument("-y", "--yes", "-f", "--force", dest="yes", action="store_true", help="Skip confirmation")
+    signout = commands.add_parser("logout", help="Log out without revoking saved credentials")
+    signout.add_argument("-y", "--yes", "-f", "--force", dest="yes", action="store_true", help="Skip confirmation")
     remove = commands.add_parser("remove", aliases=["rm"], help="Remove a saved account")
     remove.add_argument("name")
     commands.add_parser("current", aliases=["whoami"], help="Show the login stored on disk")
