@@ -1,7 +1,7 @@
 # codex-accounts
 
-Switch between saved Codex accounts, with confirmation before stopping the shared
-background daemon so the next Codex session loads the selected login.
+Switch between saved Codex accounts, with confirmation before restarting the
+shared background daemon to load the selected login.
 
 This is a new implementation inspired by [YogevKr's original account-switching
 Gist](https://gist.github.com/YogevKr/8a1560743b77f7c2711747ff74547042).
@@ -19,7 +19,7 @@ It keeps the original commands, aliases, and `accounts/<name>.json` format.
   ```
 
 The default Codex directory is `~/.codex`. A custom `CODEX_HOME` is respected by
-both the installer and the tool, including the daemon shutdown command.
+both the installer and the tool, including the daemon stop/start commands.
 Keyring and ephemeral credentials are not managed by this tool. See the
 [official authentication documentation](https://learn.chatgpt.com/docs/auth).
 
@@ -71,8 +71,8 @@ bash install.sh --local
 ### Switching
 
 ```text
-Warning: switching stops the shared Codex daemon. Existing CLI sessions will disconnect until you start Codex again. Active responses and background tasks may be interrupted.
-Stop the daemon and switch accounts? [y/N]
+Warning: switching restarts the shared Codex daemon. Existing CLI sessions will disconnect while the daemon restarts. Active responses and background tasks may be interrupted.
+Restart the daemon and switch accounts? [y/N]
 ```
 
 An empty answer, `n`, or EOF cancels the switch. For deliberate noninteractive use:
@@ -84,9 +84,14 @@ An empty answer, `n`, or EOF cancels the switch. For deliberate noninteractive u
 Switching validates the saved credentials, stops the daemon using
 `codex app-server daemon stop`, and checks that Codex reports `stopped` or
 `notRunning`. Shutdown failure or timeout aborts the switch. It then saves any
-refreshed credentials for the account being left and atomically replaces
-`auth.json`. Start a new Codex CLI to load the selected login and allow existing
-CLI sessions to reconnect. No daemon is started by the tool.
+refreshed credentials for the account being left, atomically replaces
+`auth.json`, and runs `codex app-server daemon start`. Existing CLI sessions can
+then reconnect without opening another CLI.
+
+If startup fails or times out, the selected credentials remain on disk and the
+command exits with an error explaining that the account was switched. Retry
+`codex app-server daemon start` from a separate terminal. Credentials are not
+rolled back automatically.
 
 In a manual test with Codex 0.159.3, stopping the daemon made existing CLI sessions
 show `Connection lost. Attempting to reconnect…`. Those sessions did not appear
@@ -144,17 +149,18 @@ bash -n install.sh
 ```
 
 Automated tests use fake credentials and a fake Codex command to check confirmation,
-shutdown ordering and failures, token refresh, private file permissions, account
+stop/swap/start ordering and failures, token refresh, private file permissions, account
 commands, concurrent switches, and installer replacement/failure behavior.
 CI runs these checks on Linux and macOS with Python 3.10 and 3.12.
 Actual daemon start/stop has also been checked with Codex 0.159.3 using an isolated
 `CODEX_HOME` without real credentials. A separate manual test of live CLI sessions
 confirmed the disconnection/reconnection behavior described above.
 
-Before team rollout, verify a real account switch: open a new CLI afterward and
-check the account it uses. Also check the account in reconnected sessions and
-whether interrupted responses and background tasks resume. Do not infer
-uninterrupted operation from the switch command succeeding or clients reconnecting.
+Before team rollout, verify a real account switch: check that existing CLI sessions
+reconnect after the automatic daemon start and check the account they use. Also
+open a fresh CLI to verify its account and check whether interrupted responses
+and background tasks resume. Do not infer uninterrupted operation from the switch
+command succeeding or clients reconnecting.
 
 ## License
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Switch file-based Codex logins after stopping the shared daemon."""
+"""Switch file-based Codex logins and restart the shared daemon."""
 
 import argparse
 import base64
@@ -172,10 +172,33 @@ def stop_daemon(home):
         raise AccountError("Codex did not confirm daemon shutdown. Credentials have not been switched.")
 
 
+def start_daemon(home):
+    try:
+        result = subprocess.run(
+            ["codex", "app-server", "daemon", "start"],
+            env=dict(os.environ, CODEX_HOME=str(home)),
+            capture_output=True, text=True, timeout=60,
+        )
+    except FileNotFoundError:
+        raise AccountError("'codex' is no longer available on PATH") from None
+    except OSError:
+        raise AccountError("could not execute Codex for daemon startup") from None
+    except subprocess.TimeoutExpired:
+        raise AccountError("daemon startup timed out") from None
+    if result.returncode:
+        raise AccountError("daemon startup failed")
+    try:
+        status = json.loads(result.stdout).get("status")
+    except (ValueError, AttributeError):
+        status = None
+    if status not in ("started", "alreadyRunning", "running"):
+        raise AccountError("Codex did not confirm daemon startup")
+
+
 def confirm_switch(yes):
     print(
-        "Warning: switching stops the shared Codex daemon. Existing CLI sessions will "
-        "disconnect until you start Codex again. Active responses and background tasks "
+        "Warning: switching restarts the shared Codex daemon. Existing CLI sessions will "
+        "disconnect while the daemon restarts. Active responses and background tasks "
         "may be interrupted.",
         file=sys.stderr,
     )
@@ -184,7 +207,7 @@ def confirm_switch(yes):
     if not sys.stdin.isatty():
         raise AccountError("Confirmation requires a terminal. Use --yes to explicitly accept the interruption.")
     try:
-        return input("Stop the daemon and switch accounts? [y/N] ").strip().lower() in {"y", "yes"}
+        return input("Restart the daemon and switch accounts? [y/N] ").strip().lower() in {"y", "yes"}
     except EOFError:
         return False
 
@@ -212,8 +235,15 @@ def switch(home, args):
             elif previous is not None:
                 write_auth(previous, current_raw)
         write_auth(current, raw)
+        try:
+            start_daemon(home)
+        except AccountError as exc:
+            raise AccountError(
+                f"Credentials switched to '{args.name}', but {exc}. "
+                "Run 'codex app-server daemon start' from a separate terminal to retry."
+            ) from None
     email, _ = describe(auth)
-    print(f"Switched to: {args.name} ({email}). Start a new Codex CLI to load this account and reconnect existing sessions.")
+    print(f"Switched to: {args.name} ({email}). Codex daemon started; existing CLI sessions can reconnect.")
 
 
 def dispatch(home, args):
@@ -267,7 +297,7 @@ def main():
     add = commands.add_parser("add", help="Save the current file-based login")
     add.add_argument("name", nargs="?")
     add.add_argument("-f", "--force", action="store_true")
-    change = commands.add_parser("switch", aliases=["sw"], help="Stop the daemon and switch accounts")
+    change = commands.add_parser("switch", aliases=["sw"], help="Switch accounts and restart the daemon")
     change.add_argument("name")
     change.add_argument("-y", "--yes", action="store_true", help="Accept interruption without prompting")
     remove = commands.add_parser("remove", aliases=["rm"], help="Remove a saved account")

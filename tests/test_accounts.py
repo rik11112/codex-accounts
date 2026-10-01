@@ -43,7 +43,17 @@ class AccountsTests(unittest.TestCase):
         daemon.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, sys
 home = pathlib.Path(os.environ["CODEX_HOME"])
-assert sys.argv[1:] == ["app-server", "daemon", "stop"]
+assert sys.argv[1:3] == ["app-server", "daemon"]
+assert sys.argv[3] in {"stop", "start"}
+with (home / "daemon-call-order").open("a") as log:
+    log.write(sys.argv[3] + "\\n")
+if sys.argv[3] == "start":
+    (home / "daemon-start-events").write_text((home / "auth.json").read_text())
+    if os.environ.get("FAKE_START_FAILURE"):
+        print("private-start-output", file=sys.stderr)
+        sys.exit(1)
+    print(os.environ.get("FAKE_START_RESULT", '{"status":"started"}'))
+    sys.exit(0)
 with (home / "daemon-events").open("a") as log:
     log.write((home / "auth.json").read_text() if (home / "auth.json").exists() else "absent")
 if os.environ.get("FAKE_REFRESH"):
@@ -72,7 +82,9 @@ print(os.environ.get("FAKE_RESULT", '{"status":"stopped"}'))
         self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.after)
         self.assertEqual(json.loads((self.home / "accounts/before.json").read_text()), self.before)
         self.assertIn("background tasks may be interrupted", result.stderr)
-        self.assertIn("disconnect until you start Codex again", result.stderr)
+        self.assertIn("disconnect while the daemon restarts", result.stderr)
+        self.assertEqual(json.loads((self.home / "daemon-start-events").read_text()), self.after)
+        self.assertEqual((self.home / "daemon-call-order").read_text().splitlines(), ["stop", "start"])
         self.assertEqual((self.home / "auth.json").stat().st_mode & 0o777, 0o600)
 
     def test_shutdown_failure_keeps_current_and_saved_credentials(self):
@@ -81,6 +93,24 @@ print(os.environ.get("FAKE_RESULT", '{"status":"stopped"}'))
         self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.before)
         self.assertEqual(json.loads((self.home / "accounts/before.json").read_text()), self.before)
         self.assertNotIn("private-cli-output", result.stderr)
+        self.assertFalse((self.home / "daemon-start-events").exists())
+
+    def test_startup_failure_keeps_selected_credentials_and_explains_recovery(self):
+        result = self.run_cli("switch", "after", "--yes", FAKE_START_FAILURE="1")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.after)
+        self.assertEqual(json.loads((self.home / "accounts/before.json").read_text()), self.before)
+        self.assertIn("Credentials switched to 'after'", result.stderr)
+        self.assertIn("codex app-server daemon start", result.stderr)
+        self.assertNotIn("private-start-output", result.stderr)
+
+    def test_unconfirmed_startup_reports_selected_credentials(self):
+        for output in ('{"status":"stopped"}', 'not-json', '[]', '{"status":[]}'):
+            with self.subTest(output=output):
+                result = self.run_cli("switch", "after", "--yes", FAKE_START_RESULT=output)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.after)
+                self.assertIn("Credentials switched to 'after'", result.stderr)
 
     def test_unknown_or_malformed_shutdown_status_aborts(self):
         for output in ('{"status":"running"}', 'not-json', '[]', '{}', '{"status":[]}'):
@@ -247,6 +277,26 @@ print(os.environ.get("FAKE_RESULT", '{"status":"stopped"}'))
                 with mock.patch.object(accounts.subprocess, "run", side_effect=failure):
                     with self.assertRaisesRegex(accounts.AccountError, "Credentials have not been switched"):
                         accounts.stop_daemon(self.home)
+
+    def test_startup_timeout_reports_switched_credentials(self):
+        args = mock.Mock(yes=True)
+        args.name = "after"
+        with mock.patch.object(accounts, "stop_daemon"), \
+                mock.patch.object(accounts.subprocess, "run", side_effect=subprocess.TimeoutExpired("codex", 60)):
+            with self.assertRaisesRegex(accounts.AccountError, "Credentials switched to 'after'.*startup timed out"):
+                accounts.switch(self.home, args)
+        self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.after)
+
+    def test_startup_execution_failure_reports_switched_credentials(self):
+        args = mock.Mock(yes=True)
+        args.name = "after"
+        for failure in (FileNotFoundError(), PermissionError()):
+            with self.subTest(failure=type(failure).__name__):
+                with mock.patch.object(accounts, "stop_daemon"), \
+                        mock.patch.object(accounts.subprocess, "run", side_effect=failure):
+                    with self.assertRaisesRegex(accounts.AccountError, "Credentials switched to 'after'"):
+                        accounts.switch(self.home, args)
+                self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.after)
 
 
 if __name__ == "__main__":
