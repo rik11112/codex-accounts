@@ -174,8 +174,9 @@ def stop_daemon(home):
 
 def confirm_switch(yes):
     print(
-        "Warning: switching stops the shared Codex daemon. Active CLI sessions and "
-        "background tasks may be interrupted. Close other Codex clients before continuing.",
+        "Warning: switching stops the shared Codex daemon. Existing CLI sessions will "
+        "disconnect until you start Codex again. Active responses and background tasks "
+        "may be interrupted.",
         file=sys.stderr,
     )
     if yes:
@@ -212,7 +213,7 @@ def switch(home, args):
                 write_auth(previous, current_raw)
         write_auth(current, raw)
     email, _ = describe(auth)
-    print(f"Switched to: {args.name} ({email}). Reopen Codex to use this account.")
+    print(f"Switched to: {args.name} ({email}). Start a new Codex CLI to load this account and reconnect existing sessions.")
 
 
 def dispatch(home, args):

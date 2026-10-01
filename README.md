@@ -25,8 +25,9 @@ Keyring and ephemeral credentials are not managed by this tool. See the
 
 ## Install or replace the original tool
 
-The current build on `main` is available for testing. Live CLI and background-task
-behavior must still be checked before the first release and team rollout.
+The current build on `main` is available for testing. CLI disconnection and
+reconnection after daemon shutdown have been checked. Account loading after a
+switch and interrupted/background work still need checking before the first release.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rik11112/codex-accounts/main/install.sh | CODEX_ACCOUNTS_REF=main bash
@@ -70,7 +71,7 @@ bash install.sh --local
 ### Switching
 
 ```text
-Warning: switching stops the shared Codex daemon. Active CLI sessions and background tasks may be interrupted. Close other Codex clients before continuing.
+Warning: switching stops the shared Codex daemon. Existing CLI sessions will disconnect until you start Codex again. Active responses and background tasks may be interrupted.
 Stop the daemon and switch accounts? [y/N]
 ```
 
@@ -84,7 +85,14 @@ Switching validates the saved credentials, stops the daemon using
 `codex app-server daemon stop`, and checks that Codex reports `stopped` or
 `notRunning`. Shutdown failure or timeout aborts the switch. It then saves any
 refreshed credentials for the account being left and atomically replaces
-`auth.json`. Reopen Codex to use the selected login. No daemon is started by the tool.
+`auth.json`. Start a new Codex CLI to load the selected login and allow existing
+CLI sessions to reconnect. No daemon is started by the tool.
+
+In a manual test with Codex 0.159.3, stopping the daemon made existing CLI sessions
+show `Connection lost. Attempting to reconnect…`. Those sessions did not appear
+to restart the daemon themselves. Starting a new CLI session started the daemon,
+and the disconnected sessions reconnected. This confirms reconnection behavior;
+it does not establish that an interrupted response or background task continues.
 
 The tool uses the daemon management command rather than matching and killing
 process names. Other Codex clients, such as an IDE extension or a session started
@@ -140,12 +148,13 @@ shutdown ordering and failures, token refresh, private file permissions, account
 commands, concurrent switches, and installer replacement/failure behavior.
 CI runs these checks on Linux and macOS with Python 3.10 and 3.12.
 Actual daemon start/stop has also been checked with Codex 0.159.3 using an isolated
-`CODEX_HOME` without real credentials.
+`CODEX_HOME` without real credentials. A separate manual test of live CLI sessions
+confirmed the disconnection/reconnection behavior described above.
 
-Before team rollout, verify the installed Codex version with an idle CLI, an
-active response, and a background task. Check whether clients disconnect or
-reconnect, whether work resumes, and whether a new session uses the selected
-account. Do not infer uninterrupted operation from the switch command succeeding.
+Before team rollout, verify a real account switch: open a new CLI afterward and
+check the account it uses. Also check the account in reconnected sessions and
+whether interrupted responses and background tasks resume. Do not infer
+uninterrupted operation from the switch command succeeding or clients reconnecting.
 
 ## License
 

@@ -72,6 +72,7 @@ print(os.environ.get("FAKE_RESULT", '{"status":"stopped"}'))
         self.assertEqual(json.loads((self.home / "auth.json").read_text()), self.after)
         self.assertEqual(json.loads((self.home / "accounts/before.json").read_text()), self.before)
         self.assertIn("background tasks may be interrupted", result.stderr)
+        self.assertIn("disconnect until you start Codex again", result.stderr)
         self.assertEqual((self.home / "auth.json").stat().st_mode & 0o777, 0o600)
 
     def test_shutdown_failure_keeps_current_and_saved_credentials(self):
